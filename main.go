@@ -4,13 +4,21 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"hash/maphash"
 	"math"
 	"math/rand"
 	"os"
 	"sort"
+	"strconv"
+	"strings"
 )
+
+var replicationFactor = flag.Int("rf", 1, "replication factor")
+var numWrites = flag.Int("numWrites", 1000, "number of writes")
+var numReads = flag.Int("numReads", 10000, "number of reads, uniformly random to the site set")
+var siteCaps = flag.String("siteCaps", "", "comma separated list of integers, each of which represents a site and its capacity")
 
 var siteCounter int
 
@@ -44,55 +52,69 @@ func (s *site) handleRead(key int) bool {
 	return false
 }
 
-var sites = []*site{newSite(20000), newSite(10000), newSite(10000), newSite(10000)}
-
-const numWrites = 1000
-const numReads = 100000 // Number of reads, uniformly random in the write set.
-const replicationFactor = 2
-
 func main() {
-	if replicationFactor > len(sites) {
+	flag.Parse()
+
+	if *siteCaps == "" {
+		fmt.Println("please supply --siteCaps")
+		os.Exit(1)
+	}
+
+	var sites []*site
+	for _, ss := range strings.Split(*siteCaps, ",") {
+		c, err := strconv.Atoi(ss)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		sites = append(sites, newSite(c))
+	}
+
+	if *replicationFactor > len(sites) {
 		fmt.Printf("replication factor %d is greater than num sites (%d)", replicationFactor, len(sites))
 		os.Exit(1)
 	}
 
+	// Writes.
 	unableToWrite := make(map[int]struct{})
-	for key := 0; key < numWrites; key++ {
-		sites := hashOrderedSites(key)
+	for key := 0; key < *numWrites; key++ {
+		sites := hashOrderedSites(sites, key)
 		allAvail := true
-		for i := 0; i < replicationFactor; i++ {
+		for i := 0; i < *replicationFactor; i++ {
 			allAvail = allAvail && !sites[i].full()
 		}
 		if !allAvail {
 			unableToWrite[key] = struct{}{}
 			continue
 		}
-		for i := 0; i < replicationFactor; i++ {
+		for i := 0; i < *replicationFactor; i++ {
 			sites[i].handleWrite(key)
 		}
 	}
 
-	for i := 0; i < numReads; i++ {
-		key := rand.Intn(numWrites)
+	// Reads.
+	for i := 0; i < *numReads; i++ {
+		key := rand.Intn(*numWrites)
 		if _, ok := unableToWrite[key]; ok {
 			continue
 		}
-		for _, s := range hashOrderedSites(key) {
+		for _, s := range hashOrderedSites(sites, key) {
 			if s.handleRead(key) {
 				break
 			}
 		}
 	}
 
+	// Print stats.
 	for _, s := range sites {
-		fmt.Printf("site %d: %d/%d (%.2f%% full). received reads: %d hits (%.2f%% of total), %d misses\n", s.id, len(s.knownKeys), s.capacity, float64(len(s.knownKeys))/float64(s.capacity)*100, s.readHits, float64(s.readHits)/float64(numReads)*100, s.readMisses)
+		fmt.Printf("site %d: %d/%d (%.2f%% full). received reads: %d hits (%.2f%% of total), %d misses\n", s.id, len(s.knownKeys), s.capacity, float64(len(s.knownKeys))/float64(s.capacity)*100, s.readHits, float64(s.readHits)/float64(*numReads)*100, s.readMisses)
 	}
-	fmt.Printf("unable to write: %d (%.2f%%)\n", len(unableToWrite), float64(len(unableToWrite))/float64(numWrites)*100)
+	fmt.Printf("unable to write: %d (%.2f%%)\n", len(unableToWrite), float64(len(unableToWrite))/float64(*numWrites)*100)
 }
 
 var seed = maphash.MakeSeed()
 
-func hashOrderedSites(key int) []*site {
+func hashOrderedSites(sites []*site, key int) []*site {
 	type indexedSite struct {
 		*site
 		num float64
