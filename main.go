@@ -107,7 +107,12 @@ func main() {
 
 	// Print stats.
 	for _, s := range sites {
-		fmt.Printf("site %d: %d/%d (%.2f%% full). received reads: %d hits (%.2f%% of total), %d misses\n", s.id, len(s.knownKeys), s.capacity, float64(len(s.knownKeys))/float64(s.capacity)*100, s.readHits, float64(s.readHits)/float64(*numReads)*100, s.readMisses)
+		fmt.Printf("site %d: %d/%d (%.2f%% full)", s.id, len(s.knownKeys), s.capacity, float64(len(s.knownKeys))/float64(s.capacity)*100)
+		if *numReads == 0 {
+			fmt.Println()
+		} else {
+			fmt.Printf(". received reads: %d hits (%.2f%% of total), %d misses\n", s.readHits, float64(s.readHits)/float64(*numReads)*100, s.readMisses)
+		}
 	}
 	fmt.Printf("unable to write: %d (%.2f%%)\n", len(unableToWrite), float64(len(unableToWrite))/float64(*numWrites)*100)
 }
@@ -122,8 +127,8 @@ func hashOrderedSites(sites []*site, key int) []*site {
 	var indexedSites []*indexedSite
 	for _, s := range sites {
 		hashKey := fmt.Sprintf("%d-%d", s.id, key)
-		c := maphash.String(seed, hashKey)
-		checksum := float64(s.capacity) / -1 * math.Log(float64(c)/math.MaxUint64)
+		c := float64(maphash.String(seed, hashKey)) / float64(math.MaxUint64)
+		checksum := -1 * float64(s.capacity) / math.Log(c)
 		indexedSites = append(indexedSites, &indexedSite{site: s, num: checksum})
 	}
 	sort.Slice(indexedSites, func(i, j int) bool {
